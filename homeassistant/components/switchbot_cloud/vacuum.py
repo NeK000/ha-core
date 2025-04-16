@@ -16,10 +16,14 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from . import SwitchbotCloudData
 from .const import (
     DOMAIN,
+    VACUUM_CLEANING_MODE_SWEEP,
+    VACUUM_CLEANING_MODE_SWEEP_MOP,
     VACUUM_FAN_SPEED_MAX,
     VACUUM_FAN_SPEED_QUIET,
     VACUUM_FAN_SPEED_STANDARD,
     VACUUM_FAN_SPEED_STRONG,
+    VACUUM_WATER_LEVEL_HIGH,
+    VACUUM_WATER_LEVEL_LOW,
 )
 from .coordinator import SwitchBotCoordinator
 from .entity import SwitchBotCloudEntity
@@ -49,6 +53,20 @@ VACUUM_SWITCHBOT_STATE_TO_HA_STATE: dict[str, VacuumActivity] = {
     "InTrouble": VacuumActivity.ERROR,
     "InRemoteControl": VacuumActivity.CLEANING,
     "InDustCollecting": VacuumActivity.DOCKED,
+    "explore": VacuumActivity.CLEANING,
+    "cleanAll": VacuumActivity.CLEANING,
+    "cleanArea": VacuumActivity.CLEANING,
+    "cleanRoom": VacuumActivity.CLEANING,
+    "fillWater": VacuumActivity.CLEANING,
+    "deepWashing": VacuumActivity.CLEANING,
+    "backToCharge": VacuumActivity.RETURNING,
+    "markingWaterBase": VacuumActivity.CLEANING,
+    "drying": VacuumActivity.DOCKED,
+    "collectDust": VacuumActivity.DOCKED,
+    "remoteControl": VacuumActivity.CLEANING,
+    "cleanWithExplorer": VacuumActivity.CLEANING,
+    "fillWaterForHumi": VacuumActivity.CLEANING,
+    "markingHumi": VacuumActivity.CLEANING,
 }
 
 VACUUM_FAN_SPEED_TO_SWITCHBOT_FAN_SPEED: dict[str, str] = {
@@ -56,6 +74,23 @@ VACUUM_FAN_SPEED_TO_SWITCHBOT_FAN_SPEED: dict[str, str] = {
     VACUUM_FAN_SPEED_STANDARD: "1",
     VACUUM_FAN_SPEED_STRONG: "2",
     VACUUM_FAN_SPEED_MAX: "3",
+}
+
+VACUUM_S10_FAN_SPEED_TO_SWITCHBOT_FAN_SPEED: dict[str, int] = {
+    VACUUM_FAN_SPEED_QUIET: 1,
+    VACUUM_FAN_SPEED_STANDARD: 2,
+    VACUUM_FAN_SPEED_STRONG: 3,
+    VACUUM_FAN_SPEED_MAX: 4,
+}
+
+VACUUM_S10_WATER_LEVEL_TO_SWITCHBOT_WATER_LEVEL: dict[str, int] = {
+    VACUUM_WATER_LEVEL_LOW: 1,
+    VACUUM_WATER_LEVEL_HIGH: 2,
+}
+
+VACUUM_S10_CLEANING_MODE_TO_SWITCHBOT_CLEANING_MODE: dict[str, str] = {
+    VACUUM_CLEANING_MODE_SWEEP: "sweep",
+    VACUUM_CLEANING_MODE_SWEEP_MOP: "Sweep and Mop",
 }
 
 
@@ -82,14 +117,19 @@ class SwitchBotCloudVacuum(SwitchBotCloudEntity, StateVacuumEntity):
         self._attr_fan_speed = fan_speed
         if fan_speed in VACUUM_FAN_SPEED_TO_SWITCHBOT_FAN_SPEED:
             await self.send_api_command(
-                VacuumCommands.POW_LEVEL,
-                parameters=VACUUM_FAN_SPEED_TO_SWITCHBOT_FAN_SPEED[fan_speed],
+                "changeParam",
+                parameters={
+                    "fanLevel": VACUUM_S10_FAN_SPEED_TO_SWITCHBOT_FAN_SPEED[fan_speed],
+                    "waterLevel": VACUUM_S10_WATER_LEVEL_TO_SWITCHBOT_WATER_LEVEL[
+                        VACUUM_WATER_LEVEL_HIGH
+                    ],
+                    "times": 1,
+                },
             )
-        self.async_write_ha_state()
 
     async def async_pause(self) -> None:
         """Pause the cleaning task."""
-        await self.send_api_command(VacuumCommands.STOP)
+        await self.send_api_command("pause")
 
     async def async_return_to_base(self, **kwargs: Any) -> None:
         """Set the vacuum cleaner to return to the dock."""
@@ -97,7 +137,13 @@ class SwitchBotCloudVacuum(SwitchBotCloudEntity, StateVacuumEntity):
 
     async def async_start(self) -> None:
         """Start or resume the cleaning task."""
-        await self.send_api_command(VacuumCommands.START)
+        await self.send_api_command(
+            "startClean",
+            parameters={
+                "action": "sweep",
+                "param": {"fanLevel": 1, "waterLevel": 1, "times": 1},
+            },
+        )
 
     def _set_attributes(self) -> None:
         """Set attributes from coordinator data."""
@@ -107,7 +153,12 @@ class SwitchBotCloudVacuum(SwitchBotCloudEntity, StateVacuumEntity):
         self._attr_battery_level = self.coordinator.data.get("battery")
         self._attr_available = self.coordinator.data.get("onlineStatus") == "online"
 
-        switchbot_state = str(self.coordinator.data.get("workingStatus"))
+        switchbot_state = (
+            str(self.coordinator.data.get("workingStatus"))
+            if str(self.coordinator.data.get("taskType")) == "standBy"
+            else str(self.coordinator.data.get("taskType"))
+        )
+
         self._attr_activity = VACUUM_SWITCHBOT_STATE_TO_HA_STATE.get(switchbot_state)
 
 
